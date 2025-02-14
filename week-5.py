@@ -1,8 +1,6 @@
 import math
 import copy
-# from decimal import Decimal, getcontext
 
-# getcontext().prec = 28
 activation_function = {
     "ReLU": "ReLU",
     "Linear": "Linear",
@@ -67,14 +65,6 @@ class Network:
         ) / len(outputs)
         self.loss_function = 'mean_squared_error'
         return mse
-    # def mean_squared_error(self, outputs, expected_outputs):
-    #     # 使用 Decimal 确保每一个数值的计算都在高精度范围内
-    #     mse = sum(
-    #         (Decimal(expect) - Decimal(output)) ** 2 
-    #         for output, expect in zip(outputs, expected_outputs)
-    #     ) / Decimal(len(outputs))
-    #     self.loss_function = 'mean_squared_error'
-    #     return mse
 
     def binary_cross_entropy(self, outputs, expected_outputs):
         bce = -sum(
@@ -165,21 +155,12 @@ class Network:
                     output_gradient = loss_gradient
                     self.neuron_gradient[layer][column]['output_gradient'] = output_gradient
 
-                # else:
-                #     # 计算隐藏层的梯度
-                #     for next_layer_column in range(len(self.weights[layer + 1])):
-                #         gradient_contribution = (
-                #             self.weights[layer + 1][next_layer_column][column]  * self.neuron_gradient[layer + 1][next_layer_column]['net_output_gradient']
-                #         )
-                #         self.neuron_gradient[layer][column]['output_gradient'] += gradient_contribution
-
                 elif column == 0:
-                        # 要將第二次column的跟第一次column的相加
-                        for array in range(len(self.weights[layer+1])):
-                            for weight in range(len(self.weights[layer+1][array])):
-                                # output_gradient = self.weights[layer+1][array][weight] * self.output_array[layer+1][array]
-                                output_gradient = self.weights[layer+1][array][weight] * self.neuron_gradient[layer+1][array]['net_output_gradient']
-                                self.neuron_gradient[layer][weight]['output_gradient'] += output_gradient
+                    for array in range(len(self.weights[layer+1])):
+                        for weight in range(len(self.weights[layer+1][array])):
+                            # output_gradient = self.weights[layer+1][array][weight] * self.output_array[layer+1][array]
+                            output_gradient = self.weights[layer+1][array][weight] * self.neuron_gradient[layer+1][array]['net_output_gradient']
+                            self.neuron_gradient[layer][weight]['output_gradient'] += output_gradient
 
                 # 計算激活函數的 derivative
                 net_output_gradient = 0
