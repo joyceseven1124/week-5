@@ -33,7 +33,6 @@ class Network:
         self.other_activation_function = other_activation_function
         self.loss_function = loss_function
         self.output_array = []
-        self.input_array = []
 
 
     def _Linear(self, x):
@@ -95,9 +94,9 @@ class Network:
         return prev_input
     def forward(self, inputs):
         prev_input = inputs
-        self.input_array = inputs
         layer_len = len(self.weights)
         self.output_array = []
+        self.output_array.append(inputs)
         for layer in range(layer_len):
             row_len = len(self.weights[layer])
             init_output = [0] * row_len
@@ -131,99 +130,122 @@ class Network:
         layer_len = len(self.output_array)
         # 初始化空白的神經網絡節點
         self.neuron_gradient = [
-            [{'output_gradient': 0, 'net_output_gradient': 0} for _ in range(len(self.output_array[layer]))]
+            [{'total_output_gradient': 0, 
+                'output_netOutput_gradient': 0,} 
+                for _ in range(len(self.output_array[layer]))]
             for layer in range(layer_len)
         ]
 
-        # 紀錄每一層的輸出值
+        # 紀錄每一層的derivative -> 對 total-output output-netOutput netOutput-weight
         for layer in range(layer_len - 1, -1, -1):
             for column in range(len(self.output_array[layer])):
-                loss_gradient = 0
-                output_gradient = 0
-                if layer == layer_len - 1:
-                    # 計算輸出層的損失函數 mse 的 derivative
-                    if self.loss_function == 'mean_squared_error':
-                        loss_gradient = (2 / len(self.output_array[layer])) * (self.output_array[layer][column] - expected_outputs[column])
-                    elif self.loss_function == 'binary_cross_entropy':
-                        expect = expected_outputs[column]
-                        output = self.output_array[layer][column]
-                        # 被修正的地方
-                        # output = min(max(output, 1e-15), 1 - 1e-15)  # 防止 log(0)
-                        output = self.output_array[layer][column]
-                        loss_gradient = -((expect / output) - (1 - expect) / (1 - output))
+              total_output_gradient = 0
+              output_netOutput_gradient = 0
+              # netOutput_weight_gradient = 0
+              # 累計相乘(連鎖反應)每一層output對expect的影響
+              # total_output_all = 0
+              
+              if layer == layer_len - 1:
+                # 對輸出層-損失函數的處理
+                if self.loss_function == 'mean_squared_error':
+                    total_output_gradient = (2 / len(self.output_array[layer])) * (self.output_array[layer][column] - expected_outputs[column])
+                elif self.loss_function == 'binary_cross_entropy':
+                    expect = expected_outputs[column]
+                    output = self.output_array[layer][column]
+                    total_output_gradient = -((expect / output) - (1 - expect) / (1 - output))
+                
+                self.neuron_gradient[layer][column]['total_output_gradient'] = total_output_gradient
 
-                    output_gradient = loss_gradient
-                    self.neuron_gradient[layer][column]['output_gradient'] = output_gradient
+                # 對激活函數的處理
+                if self.output_activation_function == activation_function['Linear']:
+                    output_netOutput_gradient = 1
+                elif self.output_activation_function == activation_function['Sigmoid']:
+                    output = self.output_array[layer][column]
+                    output_netOutput_gradient = output * (1 - output)
 
-                elif column == 0:
-                    for array in range(len(self.weights[layer+1])):
-                        for weight in range(len(self.weights[layer+1][array])):
-                            # output_gradient = self.weights[layer+1][array][weight] * self.output_array[layer+1][array]
-                            output_gradient = self.weights[layer+1][array][weight] * self.neuron_gradient[layer+1][array]['net_output_gradient']
-                            self.neuron_gradient[layer][weight]['output_gradient'] += output_gradient
+                self.neuron_gradient[layer][column]['output_netOutput_gradient'] = output_netOutput_gradient
 
-                # 計算激活函數的 derivative
-                net_output_gradient = 0
-                if layer == layer_len - 1:
-                    if self.output_activation_function == activation_function['Linear']:
-                        net_output_gradient = 1
-                    elif self.output_activation_function == activation_function['Sigmoid']:
-                        output = self._Sigmoid(self.output_array[layer][column])
-                        net_output_gradient = output * (1 - output)
+                # 累計相乘(連鎖反應)每一層output對expect的影響，開始累計到上一層中
+                total_output_all = total_output_gradient * output_netOutput_gradient
+                # 避免重複跑
+                if column == 0:
+                    for array in range(len(self.neuron_gradient[layer-1])):
+                        self.neuron_gradient[layer-1][array]['total_output_gradient'] = total_output_all
 
-                elif self.other_activation_function.get(layer, None):
+                # 對權重的處理，上一層的output值
+                for array in range(len( self.output_array[layer - 1])):
+                    self.new_weights_gradient[layer-1][column][array] = self.output_array[layer - 1][array]
+
+                # 對bias權中的處理，上一層的output值
+                self.new_biasesWeights_gradient[layer-1][column][0] = self.biases
+
+
+              # 對隱藏層的處理,影響到下一層的幾個神經元
+              elif layer > 0:
+                # 影響到下一層的幾個神經元
+                for array in range(len(self.output_array[layer+1])):
+              
+                  # 對激活函數的處理
+                  if self.other_activation_function.get(layer, None):
                     if self.other_activation_function[layer] == activation_function['Linear']:
-                        net_output_gradient = 1
+                        output_netOutput_gradient = 1
                     elif self.other_activation_function[layer] == activation_function['Sigmoid']:
                         output = self.output_array[layer][column]
-                        net_output_gradient = output * (1 - output)
-                else:  # Default to ReLU for hidden layers
-                    # 被修正的地方
+                        output_netOutput_gradient = output * (1 - output)
+                  # 其餘預設ReLu
+                  else:
                     if self.output_array[layer][column] > 0:
-                        net_output_gradient = 1
+                        output_netOutput_gradient = 1
                     else:
-                        net_output_gradient = 0
+                        output_netOutput_gradient = 0
 
-                self.neuron_gradient[layer][column]['net_output_gradient'] = net_output_gradient
-                # self.neuron_gradient[layer][column]['net_output_gradient'] = (
-                #     self.neuron_gradient[layer][column]['output_gradient'] * net_output_gradient
-                # )
+                  self.neuron_gradient[layer][column]['output_netOutput_gradient'] = output_netOutput_gradient
 
-                # 計算權重的 gradient
-                if layer > 0:
-                    for output in range(len(self.output_array[layer - 1])):
-                        weight_gradient = (
-                            self.neuron_gradient[layer][column]['net_output_gradient']
-                            * self.output_array[layer - 1][output]
-                        )
-                        self.new_weights_gradient[layer][column][output] = weight_gradient
-                else:
-                    for input_idx in range(len(self.input_array)):
-                        weight_gradient = (
-                            self.neuron_gradient[layer][column]['net_output_gradient']
-                            * self.input_array[input_idx]
-                        )
-                        self.new_weights_gradient[layer][column][input_idx] = weight_gradient
+                # 進行累積相乘和相加所有關聯到下一層神經元
+                # 因為output_array放入剛開始手動輸入的input 所以比weight 多了一層
+                total_output_all = 0
+                # 有bug if layer - 1 > 0:
+                if layer -1 >= 0:
+                  for array in range(len(self.weights[layer])):
+                    next_net_now_output = self.weights[layer][array][column]
+                    total_output_gradient = self.neuron_gradient[layer+1][array]['total_output_gradient']
+                    output_netOutput_gradient = self.neuron_gradient[layer+1][array]['output_netOutput_gradient']
+                    total_output_one = total_output_gradient * output_netOutput_gradient * next_net_now_output
+                    # 所有關聯神經元相加
+                    total_output_all += total_output_one
+                    self.neuron_gradient[layer][column]['total_output_gradient'] = total_output_all
 
-                # 計算bias的 gradient
-                self.new_biasesWeights_gradient[layer][column][0] = (
-                    self.neuron_gradient[layer][column]['net_output_gradient']
-                )
+                  # 要將相乘紀錄到上一層神經元中，並且多乘入output_netOutput_gradient
+                  self.neuron_gradient[layer-1][column]['total_output_gradient'] = total_output_all * output_netOutput_gradient
+
+                # 對權重的處理，上一層的output值
+                # for array in range(len( self.output_array[layer - 1])):
+                for array in range(len( self.new_weights_gradient[layer - 1])):
+                    for id in range(len( self.new_weights_gradient[layer - 1][array])):
+                        self.new_weights_gradient[layer-1][array][id] = self.output_array[layer - 1][id]
+
+                # 對bias權中的處理，上一層的output值
+                self.new_biasesWeights_gradient[layer-1][column][0] = self.biases
+
 
     def zero_grad(self, learning_rate):
         for layer in range(len(self.new_weights_gradient)):
             for array in range(len(self.new_weights_gradient[layer])):
+                # 避開第一次手動輸入的input值
+                total_output_gradient = self.neuron_gradient[layer+1][array]['total_output_gradient']
+                output_netOutput_gradient =  self.neuron_gradient[layer+1][array]['output_netOutput_gradient']
                 for column in range(len(self.new_weights_gradient[layer][array])):
                     old_weight = self.weights[layer][array][column]
-                    # gradient = self.new_weights_gradient[layer][array][column]
-                    gradient = self.new_weights_gradient[layer][array][column] * self.neuron_gradient[layer][array]['net_output_gradient'] * self.neuron_gradient[layer][array]['output_gradient']
-                    # 權重更新
-                    self.weights[layer][array][column] = old_weight - learning_rate * gradient
+                    weight_gradient = self.new_weights_gradient[layer][array][column]
+                    gradient = total_output_gradient * output_netOutput_gradient * weight_gradient         
+                    new_weight = old_weight - learning_rate * gradient
+                    self.weights[layer][array][column] = new_weight
 
-                bias_old_weight = self.biasesWeights[layer][array][0]
-                bias_gradient =  self.new_biasesWeights_gradient[layer][array][0] * self.neuron_gradient[layer][array]['net_output_gradient'] * self.neuron_gradient[layer][array]['output_gradient']
-                # bias_gradient = self.new_biasesWeights_gradient[layer][array][0]
-                self.biasesWeights[layer][array][0] = bias_old_weight - learning_rate * bias_gradient
+                bias_gradient = self.new_biasesWeights_gradient[layer][array][0]
+                gradient =  total_output_gradient * output_netOutput_gradient * bias_gradient
+                old_bias_weight = self.biasesWeights[layer][array][0]
+                new_bias_weight = old_bias_weight - learning_rate * gradient
+                self.biasesWeights[layer][array][0] = new_bias_weight
                     
 
 print("--------------Model01------------------")
@@ -343,7 +365,6 @@ network_2_1 = Network(
 
 network_outputs = network_2_1.forward([0.75, 1.25])
 network_expected_outputs = [1]
-print("Outputs", network_outputs)
 print(
     "Total Loss",
     network_2_1.binary_cross_entropy(
